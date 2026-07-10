@@ -6,6 +6,8 @@
     <title>NightSpot Smart Driver</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#ffd700">
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background: #121212; font-family: sans-serif;}
         #map { height: 100vh; width: 100%; z-index: 1;}
@@ -27,26 +29,55 @@
             cursor: pointer;
         }
         .leaflet-popup-content { margin: 15px; text-align: center; }
-    </style>
-
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#ffd700">
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js');
+        .reset-key-btn {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: #ff3366;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
         }
-    </script>
+    </style>
 </head>
 <body>
 
     <div id="map"></div>
     <button class="action-btn" onclick="scanNearby()">Ask AI for Best Spot</button>
+    <button class="reset-key-btn" onclick="resetAPIKey()">Reset API Key</button>
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // AAPKI API KEY
-        const GEMINI_API_KEY = "AIzaSyA1sdto4qU0taaJdxnUrTJUR90COvEzPaw";
+        // PWA Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(err => console.log(err));
+        }
+
+        // SECURE API KEY LOGIC (Local Storage)
+        let GEMINI_API_KEY = localStorage.getItem("nightspot_gemini_key");
+
+        function getAPIKey() {
+            if (!GEMINI_API_KEY) {
+                GEMINI_API_KEY = prompt("First Time Setup: Please enter your Google Gemini API Key. \n\n(It will be saved securely on your device only.)");
+                if (GEMINI_API_KEY) {
+                    localStorage.setItem("nightspot_gemini_key", GEMINI_API_KEY.trim());
+                } else {
+                    alert("App cannot use AI without the API Key!");
+                }
+            }
+            return GEMINI_API_KEY;
+        }
+
+        function resetAPIKey() {
+            localStorage.removeItem("nightspot_gemini_key");
+            GEMINI_API_KEY = null;
+            getAPIKey();
+        }
 
         // Map Initialize
         var map = L.map('map').setView([24.7136, 46.6753], 13);
@@ -81,10 +112,11 @@
             }
         });
 
-        // ULTIMATE AI FUNCTION (With Live Time & Auto-Model Loop)
+        // ULTIMATE AI FUNCTION (With Secure Key Handling)
         async function askGemini(placesList) {
-            
-            // 1. Mobile se Live waqt aur din nikalna
+            const apiKeyToUse = getAPIKey();
+            if(!apiKeyToUse) return null;
+
             const now = new Date();
             const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
             const currentDay = days[now.getDay()]; 
@@ -97,7 +129,6 @@
             minutes = minutes < 10 ? '0' + minutes : minutes;
             const currentTime = hours + ':' + minutes + ' ' + ampm; 
 
-            // 2. Prompt mein Live Time Daalna
             const prompt = `Current local time in Riyadh is ${currentDay}, ${currentTime}. 
             My target for ride-hailing is to find passengers. If it's late night, focus on night-shift expat workers (like nurses) or 24/7 commercial areas. If it's daytime or evening, focus on malls, active clinics, or supermarkets.
             Here are nearby places:
@@ -106,17 +137,16 @@
             Reply with ONLY the exact name of the place from the list. Do not write anything else.`;
 
             try {
-                // 3. API se allowed models ki list lana
-                const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`;
+                const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKeyToUse}`;
                 const modelsRes = await fetch(modelsUrl);
                 const modelsData = await modelsRes.json();
                 
                 if(modelsData.error) {
                     alert("API Key Error: " + modelsData.error.message);
+                    if(modelsData.error.message.includes("API key not valid")) resetAPIKey();
                     return null;
                 }
 
-                // 4. Valid models filter karna
                 const validModels = modelsData.models.filter(m => 
                     m.name.includes("gemini") && 
                     m.supportedGenerationMethods.includes("generateContent")
@@ -124,10 +154,9 @@
 
                 let lastError = "";
 
-                // 5. Loop laga kar har model ko try karna
                 for (let model of validModels) {
-                    console.log(`Trying ${model.name} for ${currentDay} ${currentTime}`);
-                    const url = `https://generativelanguage.googleapis.com/v1beta/${model.name}:generateContent?key=${GEMINI_API_KEY}`;
+                    console.log(`Trying ${model.name}`);
+                    const url = `https://generativelanguage.googleapis.com/v1beta/${model.name}:generateContent?key=${apiKeyToUse}`;
                     
                     const response = await fetch(url, {
                         method: "POST",
@@ -140,26 +169,24 @@
                     const data = await response.json();
                     
                     if(!data.error && data.candidates) {
-                        console.log("SUCCESS! Model used:", model.name);
                         return data.candidates[0].content.parts[0].text.trim();
                     } else {
-                        console.warn(model.name + " failed:", data.error.message);
                         lastError = data.error.message; 
                     }
                 }
 
-                alert("Sab models fail ho gaye! Last error: " + lastError);
+                alert("AI limit reached or models blocked! Last error: " + lastError);
                 return null;
 
             } catch (error) {
                 alert("Network Error. Console check karein.");
-                console.error(error);
                 return null;
             }
         }
 
-        // Scan API Function
         async function scanNearby() {
+            if(!getAPIKey()) return;
+
             if(!driverLat || !driverLon) {
                 alert("Pehle map par click kar ke location set karein!");
                 return;
