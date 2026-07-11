@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NightSpot Smart Driver</title>
+    <title>Madina Smart Driver Pro</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#ffd700">
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; background: #121212; font-family: sans-serif;}
+        body, html { margin: 0; padding: 0; height: 100%; background: #121212; font-family: sans-serif; overflow: hidden;}
         #map { height: 100vh; width: 100%; z-index: 1;}
         
         .action-btn {
@@ -18,8 +18,8 @@
             left: 50%;
             transform: translateX(-50%);
             z-index: 1000;
-            padding: 15px 40px;
-            font-size: 18px;
+            padding: 15px 30px;
+            font-size: 16px;
             font-weight: bold;
             background-color: #ffd700;
             color: #000;
@@ -27,47 +27,76 @@
             border-radius: 50px;
             box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4);
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: max-content;
         }
-        .leaflet-popup-content { margin: 15px; text-align: center; }
-        .reset-key-btn {
+        
+        /* Rotating Animation */
+        .spin-icon {
+            display: inline-block;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        .top-buttons {
             position: fixed;
             top: 10px;
             right: 10px;
             z-index: 1000;
-            background: #ff3366;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .small-btn {
+            background: rgba(30, 30, 30, 0.9);
             color: white;
-            border: none;
+            border: 1px solid #444;
             padding: 8px 12px;
             border-radius: 5px;
             cursor: pointer;
             font-size: 12px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
         }
+        
+        .small-btn:active { background: #555; }
+
+        .leaflet-popup-content { margin: 10px; text-align: center; font-size: 14px; font-weight: bold; }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
-    <button class="action-btn" onclick="scanNearby()">Ask AI for Best Spot</button>
-    <button class="reset-key-btn" onclick="resetAPIKey()">Reset API Key</button>
+    
+    <div class="top-buttons">
+        <button class="small-btn" onclick="toggleMapStyle()">🗺️ Change Map View</button>
+        <button class="small-btn" onclick="resetAPIKey()" style="color:#ff3366;">🔑 Reset API Key</button>
+    </div>
+
+    <button class="action-btn" onclick="scanNearby()">
+        <span id="btn-icon">🔍</span> 
+        <span id="btn-text">Scan Madina & Ask AI</span>
+    </button>
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // PWA Service Worker Registration
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js').catch(err => console.log(err));
         }
 
-        // SECURE API KEY LOGIC (Local Storage)
+        // SECURE API KEY LOGIC
         let GEMINI_API_KEY = localStorage.getItem("nightspot_gemini_key");
 
         function getAPIKey() {
             if (!GEMINI_API_KEY) {
-                GEMINI_API_KEY = prompt("First Time Setup: Please enter your Google Gemini API Key. \n\n(It will be saved securely on your device only.)");
+                GEMINI_API_KEY = prompt("First Time Setup: Enter your Google Gemini API Key.");
                 if (GEMINI_API_KEY) {
                     localStorage.setItem("nightspot_gemini_key", GEMINI_API_KEY.trim());
                 } else {
-                    alert("App cannot use AI without the API Key!");
+                    alert("App cannot work without the API Key!");
                 }
             }
             return GEMINI_API_KEY;
@@ -79,40 +108,55 @@
             getAPIKey();
         }
 
-        // Map Initialize
-        var map = L.map('map').setView([24.7136, 46.6753], 13);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap',
-            maxZoom: 19
-        }).addTo(map);
+        // Map Setup (Centered on MADINA)
+        let isDarkMode = true;
+        var map = L.map('map').setView([24.4672, 39.6112], 13);
+        
+        var darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 });
+        var satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 });
+        
+        darkLayer.addTo(map); // Default dark mode
+
+        function toggleMapStyle() {
+            if(isDarkMode) {
+                map.removeLayer(darkLayer);
+                satelliteLayer.addTo(map);
+                isDarkMode = false;
+            } else {
+                map.removeLayer(satelliteLayer);
+                darkLayer.addTo(map);
+                isDarkMode = true;
+            }
+        }
 
         let driverLat, driverLon;
         let driverMarker; 
         let markersLayer = L.layerGroup().addTo(map);
 
-        // Map Click Location Set
+        // Click to set manual location
         map.on('click', function(e) {
             driverLat = e.latlng.lat;
             driverLon = e.latlng.lng;
             if(driverMarker) { map.removeLayer(driverMarker); }
+            // No popup text, just the blue marker
             driverMarker = L.circleMarker(e.latlng, {
-                radius: 10, fillColor: "#00ffcc", color: "#000", weight: 2, fillOpacity: 1
-            }).addTo(map).bindPopup("<b>Target Area Set!</b><br>Ab button dabayein.").openPopup();
+                radius: 8, fillColor: "#0078ff", color: "#fff", weight: 2, fillOpacity: 1
+            }).addTo(map);
         });
 
-        // Mobile GPS Location
-        map.locate({setView: true, maxZoom: 14});
+        // Mobile Auto GPS
+        map.locate({setView: true, maxZoom: 13});
         map.on('locationfound', function(e) {
             if(!driverLat) { 
                 driverLat = e.latlng.lat;
                 driverLon = e.latlng.lng;
                 driverMarker = L.circleMarker(e.latlng, {
-                    radius: 10, fillColor: "#0078ff", color: "#fff", weight: 2, fillOpacity: 1
-                }).addTo(map).bindPopup("<b>Aap Yahan Hain</b>").openPopup();
+                    radius: 8, fillColor: "#0078ff", color: "#fff", weight: 2, fillOpacity: 1
+                }).addTo(map);
             }
         });
 
-        // ULTIMATE AI FUNCTION (With Secure Key Handling)
+        // AI FUNCTION (Madina Specific)
         async function askGemini(placesList) {
             const apiKeyToUse = getAPIKey();
             if(!apiKeyToUse) return null;
@@ -129,11 +173,17 @@
             minutes = minutes < 10 ? '0' + minutes : minutes;
             const currentTime = hours + ':' + minutes + ' ' + ampm; 
 
-            const prompt = `Current local time in Riyadh is ${currentDay}, ${currentTime}. 
-            My target for ride-hailing is to find passengers. If it's late night, focus on night-shift expat workers (like nurses) or 24/7 commercial areas. If it's daytime or evening, focus on malls, active clinics, or supermarkets.
-            Here are nearby places:
+            // Madina Specific Prompt
+            const prompt = `Current local time in Madina, Saudi Arabia is ${currentDay}, ${currentTime}. 
+            I am a ride-hailing driver on a 12-hour shift looking for passengers. 
+            - If it's early morning (Fajr/Ishraq), focus on Ziyarat spots or people returning from Markaziya to outer hotels.
+            - If it's evening/night, focus on Haramain High-Speed Railway station, Airport, Malls, or restaurants.
+            - If it's late night, focus on hospitals or late-night transport hubs.
+            
+            Here are nearby places within 2.5km of my car:
             ${placesList}
-            Based on the exact current time (${currentDay} ${currentTime}) and real-world ride-hailing demand in Riyadh, which SINGLE place is the best to wait safely and get a ride? 
+            
+            Based on the EXACT current time (${currentDay} ${currentTime}) and Madina's pilgrim/local demand, which SINGLE place is the BEST to wait to get a ride fast? 
             Reply with ONLY the exact name of the place from the list. Do not write anything else.`;
 
             try {
@@ -143,7 +193,7 @@
                 
                 if(modelsData.error) {
                     alert("API Key Error: " + modelsData.error.message);
-                    if(modelsData.error.message.includes("API key not valid")) resetAPIKey();
+                    if(modelsData.error.message.includes("not valid")) resetAPIKey();
                     return null;
                 }
 
@@ -152,58 +202,53 @@
                     m.supportedGenerationMethods.includes("generateContent")
                 );
 
-                let lastError = "";
-
                 for (let model of validModels) {
-                    console.log(`Trying ${model.name}`);
                     const url = `https://generativelanguage.googleapis.com/v1beta/${model.name}:generateContent?key=${apiKeyToUse}`;
-                    
                     const response = await fetch(url, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }]
-                        })
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                     });
                     
                     const data = await response.json();
-                    
                     if(!data.error && data.candidates) {
                         return data.candidates[0].content.parts[0].text.trim();
-                    } else {
-                        lastError = data.error.message; 
                     }
                 }
-
-                alert("AI limit reached or models blocked! Last error: " + lastError);
                 return null;
-
             } catch (error) {
-                alert("Network Error. Console check karein.");
+                console.error("AI Network Error", error);
                 return null;
             }
         }
 
+        // MAIN SCAN FUNCTION
         async function scanNearby() {
             if(!getAPIKey()) return;
-
             if(!driverLat || !driverLon) {
-                alert("Pehle map par click kar ke location set karein!");
+                alert("Please click on map to set your location first!");
                 return;
             }
 
-            const btn = document.querySelector('.action-btn');
-            btn.innerHTML = "1. Scanning Area...";
+            const btnIcon = document.getElementById('btn-icon');
+            const btnText = document.getElementById('btn-text');
+            
+            // Start Loading Animation
+            btnIcon.innerHTML = "⏳";
+            btnIcon.classList.add("spin-icon");
+            btnText.innerHTML = "Scanning City...";
             markersLayer.clearLayers();
 
-            const radius = 2000;
+            // Scan Whole City Area (12km radius)
+            const scanRadius = 12000; 
             const query = `
                 [out:json][timeout:25];
                 (
-                  node["amenity"~"hospital|clinic"](around:${radius},${driverLat},${driverLon});
-                  way["amenity"~"hospital|clinic"](around:${radius},${driverLat},${driverLon});
-                  node["shop"~"mall|supermarket|department_store"](around:${radius},${driverLat},${driverLon});
-                  way["shop"~"mall|supermarket|department_store"](around:${radius},${driverLat},${driverLon});
+                  node["aeroway"~"terminal"](around:${scanRadius},${driverLat},${driverLon});
+                  node["railway"~"station"](around:${scanRadius},${driverLat},${driverLon});
+                  node["amenity"~"hospital|place_of_worship"](around:${scanRadius},${driverLat},${driverLon});
+                  node["tourism"~"hotel"](around:${scanRadius},${driverLat},${driverLon});
+                  node["shop"~"mall|supermarket"](around:${scanRadius},${driverLat},${driverLon});
                 );
                 out center;
             `;
@@ -215,69 +260,98 @@
                 const data = await response.json();
 
                 if(data.elements.length === 0) {
-                    alert("Yahan 2km mein kuch nahi mila.");
-                    btn.innerHTML = "Ask AI for Best Spot";
+                    alert("No major spots found.");
+                    resetBtnUI();
                     return;
                 }
 
-                let placesNames = [];
+                btnText.innerHTML = "AI is Thinking...";
+
+                let placesNamesForAI = [];
+                const driverLatLng = L.latLng(driverLat, driverLon);
+
+                // Filter places: Send ONLY places within 2.5km to AI
                 data.elements.forEach(place => {
-                    let type = place.tags.amenity ? place.tags.amenity : place.tags.shop;
+                    const lat = place.lat || place.center.lat;
+                    const lon = place.lon || place.center.lon;
+                    let type = place.tags.amenity || place.tags.tourism || place.tags.aeroway || place.tags.railway || place.tags.shop || "Spot";
                     let name = place.tags.name || place.tags['name:en'] || type;
-                    placesNames.push(`- ${name} (${type})`);
+                    
+                    const placeLatLng = L.latLng(lat, lon);
+                    const distanceToCar = driverLatLng.distanceTo(placeLatLng); // in meters
+                    
+                    // Agar car se 2.5km ke andar hai, toh AI ko bhejo
+                    if(distanceToCar <= 2500) {
+                        placesNamesForAI.push(`- ${name} (${type})`);
+                    }
                 });
 
-                btn.innerHTML = "2. AI Soch Raha Hai...";
+                let bestPlaceName = null;
+                if(placesNamesForAI.length > 0) {
+                    bestPlaceName = await askGemini(placesNamesForAI.join("\n"));
+                } else {
+                    alert("Poore sheher ka map load ho gaya hai, lekin aapke 2.5km qareeb koi ahem spot nahi. Thora aage drive karein.");
+                }
 
-                const bestPlaceName = await askGemini(placesNames.join("\n"));
-                
-                if(bestPlaceName) {
-                    data.elements.forEach(place => {
-                        const lat = place.lat || place.center.lat;
-                        const lon = place.lon || place.center.lon;
-                        let type = place.tags.amenity ? place.tags.amenity.toUpperCase() : place.tags.shop.toUpperCase();
-                        const name = place.tags.name || place.tags['name:en'] || type;
+                // Map par saare city ke points lagana
+                data.elements.forEach(place => {
+                    const lat = place.lat || place.center.lat;
+                    const lon = place.lon || place.center.lon;
+                    const type = place.tags.amenity || place.tags.tourism || place.tags.aeroway || place.tags.railway || place.tags.shop || "Spot";
+                    const name = place.tags.name || place.tags['name:en'] || type;
 
-                        const gmapsLink = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
-                        
-                        let isBest = bestPlaceName.includes(name);
+                    const gmapsLink = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
+                    
+                    let isBest = bestPlaceName && bestPlaceName.includes(name);
 
-                        const marker = L.circleMarker([lat, lon], {
-                            radius: isBest ? 15 : 6, 
-                            fillColor: isBest ? "#ffd700" : "#ff3366", 
-                            color: isBest ? "#000" : "#fff", 
-                            weight: isBest ? 3 : 1, 
-                            fillOpacity: 0.9
-                        });
+                    // Map pin style
+                    let pinColor = isBest ? "#ffd700" : "#555"; // Best = Gold, City = Dark Grey
+                    let pinRadius = isBest ? 16 : 5;
+                    let pinWeight = isBest ? 3 : 1;
 
-                        marker.bindPopup(`
-                            <div>
-                                ${isBest ? '⭐⭐ <b>AI RECOMMENDED</b> ⭐⭐<br>' : ''}
-                                <strong style="font-size:16px;">${name}</strong><br>
-                                <span style="color:#888; font-size:12px;">${type}</span><br><br>
-                                <a href="${gmapsLink}" target="_blank" style="display:inline-block; padding:10px 20px; background:${isBest ? '#ffd700' : '#00ffcc'}; color:#000; font-weight:bold; text-decoration:none; border-radius:5px; font-family:sans-serif;">
-                                    Drive Here 🚗
-                                </a>
-                            </div>
-                        `);
-                        
-                        markersLayer.addLayer(marker);
-                        
-                        if(isBest) {
-                            setTimeout(() => marker.openPopup(), 500);
-                        }
+                    const marker = L.circleMarker([lat, lon], {
+                        radius: pinRadius, 
+                        fillColor: pinColor, 
+                        color: isBest ? "#000" : "#fff", 
+                        weight: pinWeight, 
+                        fillOpacity: 0.9
                     });
 
-                    const group = new L.featureGroup(markersLayer.getLayers());
-                    map.fitBounds(group.getBounds().pad(0.2));
-                }
+                    // Sirf jagah ka naam, koi faltu text nahi
+                    marker.bindPopup(`
+                        <div>
+                            ${isBest ? '⭐⭐ <b>AI RECOMMENDED</b> ⭐⭐<br>' : ''}
+                            <span style="font-size:15px; color:#000;">${name}</span><br>
+                            <a href="${gmapsLink}" target="_blank" style="display:inline-block; margin-top:10px; padding:8px 15px; background:${isBest ? '#ffd700' : '#444'}; color:${isBest ? '#000' : '#fff'}; text-decoration:none; border-radius:5px;">
+                                Drive 🚗
+                            </a>
+                        </div>
+                    `);
+                    
+                    markersLayer.addLayer(marker);
+                    
+                    if(isBest) {
+                        setTimeout(() => marker.openPopup(), 600);
+                    }
+                });
+
+                const group = new L.featureGroup(markersLayer.getLayers());
+                map.fitBounds(group.getBounds().pad(0.1));
 
             } catch (error) {
                 console.error(error);
-                alert("Error: Internet connection check karein.");
+                alert("Error: Internet issue ya API slow hai.");
             }
 
-            btn.innerHTML = "Ask AI for Best Spot";
+            resetBtnUI();
+        }
+
+        function resetBtnUI() {
+            const btnIcon = document.getElementById('btn-icon');
+            const btnText = document.getElementById('btn-text');
+            btnIcon.classList.remove("spin-icon");
+            btnIcon.innerHTML = "🔍";
+            btnText.innerHTML = "Scan Madina & Ask AI";
         }
     </script>
 </body>
